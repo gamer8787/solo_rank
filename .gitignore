@@ -1,0 +1,12 @@
+env.py
+token.json
+client_secret.json
+cookies.txt
+__pycache__/
+*.pyc
+highlights/
+_download/
+*.mkv
+*.mp4
+*.webm
+.venv/
