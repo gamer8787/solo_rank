@@ -1,6 +1,7 @@
 import datetime
 import os
 import time
+from urllib.parse import quote
 
 import requests
 import json
@@ -239,8 +240,11 @@ def get_kda_time_stamp(game_id, participantId):
     # 타임스탬프 리스트를 반환
     return kill_timestamps
 def get_puuid_by_summoner_name(summoner_name):
-    game_name, tagline = summoner_name.split('#')
-    url = f"https://asia.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{game_name}/{tagline}?api_key={API_KEY}"
+    game_name, tagline = summoner_name.split('#', 1)
+    url = (
+        f"https://asia.api.riotgames.com/riot/account/v1/accounts/by-riot-id/"
+        f"{quote(game_name)}/{quote(tagline)}?api_key={API_KEY}"
+    )
     data = make_request_with_retries(url)
 
     puuid = data['puuid']
@@ -393,8 +397,50 @@ def get_participant_id(game_id, puuid):
     # PUUID가 참가자 목록에 없음
     print(f"매치 {game_id}에서 PUUID {puuid}의 참가자를 찾을 수 없습니다.")
     return None
-if __name__ =="__main__":
-    puuid = "RCUI7weq_iTer6Iwm3eZsBULJtNaL2E7IxLztxH3gr2vCZHJcNHP3TpvoB5KnMnePOdFVRN2vLAt6w"
-    print(get_summoner_name_by_puuid(puuid))
 
+def convert_tier_detail(tier_detail_str):
+    # Unranked 예외 처리
+    if tier_detail_str.strip().lower() == "unranked":
+        return "Unranked"
+
+    parts = tier_detail_str.split()
+
+    # 방어 코드 (예상 못한 형식)
+    if len(parts) < 3:
+        return tier_detail_str
+
+    tier = parts[0]          # "DIAMOND"
+    rank = parts[1]          # "I"
+    lp = parts[2].replace("LP", "")  # "32"
+
+    tier_map = {
+        "CHALLENGER": "C",
+        "GRANDMASTER": "GM",
+        "MASTER": "M",
+        "DIAMOND": "D",
+        "EMERALD": "E",
+        "PLATINUM": "P",
+        "GOLD": "G",
+        "SILVER": "S",
+        "BRONZE": "B",
+        "IRON": "I"
+    }
+
+    short = tier_map.get(tier.upper(), tier)
+
+    rank_map = {
+        "I": 1,
+        "II": 2,
+        "III": 3,
+        "IV": 4
+    }
+    rank_num = rank_map.get(rank, rank)
+
+    return f"{short}{rank_num} {lp}"
+
+
+if __name__ =="__main__":
+    puuid = "IpayW6UdfN3PxtzRnHjnHWfhvqOSgHZS7c2or0GtbS3Imtl6PQvfmF99wIj6ZgrblxnEbPMMggSMdQ"
+    print(get_summoner_name_by_puuid(puuid))
+    print(get_tier_detail_by_puuid(puuid))
     # print(get_participants("KR_7292225977"))

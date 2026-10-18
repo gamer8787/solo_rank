@@ -1,9 +1,15 @@
-import os
+import io
 import json
-from PIL import Image, ImageDraw, ImageOps, ImageEnhance, ImageFilter, ImageFont
+import urllib.request
 
-from env import ITEM_FOLDER, CHAMPION_FOLDER, RUNE_JSON_PATH, RUNE_IMAGE_FOLDER, STAT_RUNE_FOLDER, SPELL_JSON_PATH, \
-    SPELL_IMAGE_PATH, CHAMPION_FOLDER2
+from PIL import Image
+
+from env import (
+    DDRAGON_USER_AGENT,
+    ddragon_unversioned_img_root,
+    ddragon_versioned_cdn_root,
+    get_data_dragon_version,
+)
 
 STAT_RUNE_MAP = {
     5008: "StatModsAdaptiveForceIcon.png",
@@ -15,122 +21,118 @@ STAT_RUNE_MAP = {
     5001: "StatModsHealthPlusIcon.png",
 }
 
+_rune_json_cache: list | None = None
+_rune_json_ver: str | None = None
+_spell_json_cache: dict | None = None
+_spell_json_ver: str | None = None
+
+
+def _sanitize_champion_name(name: str) -> str:
+    """
+    DDragon은 대소문자를 엄격하게 구분합니다.
+    'FiddleSticks'로 들어올 경우 'Fiddlesticks'로 교정합니다.
+    """
+    if name == "FiddleSticks":
+        return "Fiddlesticks"
+    return name
+
+def _ddragon_read(url: str, timeout: int = 25) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": DDRAGON_USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _image_from_url(url: str) -> Image.Image:
+    return Image.open(io.BytesIO(_ddragon_read(url)))
+
+
 def get_item_image(item_id):
-    image_path = os.path.join(ITEM_FOLDER, f"{item_id}.png")
+    root = ddragon_versioned_cdn_root()
+    url = f"{root}/img/item/{item_id}.png"
+    return _image_from_url(url)
 
-    # 이미지가 해당 경로에 존재하는지 확인합니다.
-    if os.path.exists(image_path):
-        # 이미지를 열고 반환합니다.
-        return Image.open(image_path)
-    else:
-        # 이미지가 존재하지 않을 경우 예외를 발생시킵니다.
-        raise FileNotFoundError(f"loading Image for item_id {item_id} not found at {image_path}")
+
+# --- 챔피언 관련 함수들에 보정 로직 적용 ---
+
 def get_champion_loading_image(champion_name):
-    # 챔피언 이미지 파일 경로를 생성합니다.
-    image_path = os.path.join(CHAMPION_FOLDER, "loading", f"{champion_name}_0.jpg")
-
-    # 이미지가 해당 경로에 존재하는지 확인합니다.
-    if os.path.exists(image_path):
-        # 이미지를 열고 반환합니다.
-        return Image.open(image_path)
-    else:
-        # 이미지가 존재하지 않을 경우 예외를 발생시킵니다.
-        raise FileNotFoundError(f"loading Image for champion {champion_name} not found at {image_path}")
+    champion_name = _sanitize_champion_name(champion_name) # 이름 보정
+    root = ddragon_unversioned_img_root()
+    url = f"{root}/champion/loading/{champion_name}_0.jpg"
+    return _image_from_url(url)
 
 def get_champion_splash_image(champion_name):
-    # 챔피언 이미지 파일 경로를 생성합니다.
-    image_path = os.path.join(CHAMPION_FOLDER, "splash", f"{champion_name}_0.jpg")
-
-    # 이미지가 해당 경로에 존재하는지 확인합니다.
-    if os.path.exists(image_path):
-        # 이미지를 열고 반환합니다.
-        return Image.open(image_path)
-    else:
-        # 이미지가 존재하지 않을 경우 예외를 발생시킵니다.
-        raise FileNotFoundError(f"Splash Image for champion {champion_name} not found at {image_path}")
+    champion_name = _sanitize_champion_name(champion_name) # 이름 보정
+    root = ddragon_unversioned_img_root()
+    url = f"{root}/champion/splash/{champion_name}_0.jpg"
+    return _image_from_url(url)
 
 def get_champion_image(champion_name):
-    # 챔피언 이미지 파일 경로를 생성합니다.
-    image_path = os.path.join(CHAMPION_FOLDER2, f"{champion_name}.png")
+    champion_name = _sanitize_champion_name(champion_name) # 이름 보정
+    root = ddragon_versioned_cdn_root()
+    url = f"{root}/img/champion/{champion_name}.png"
+    return _image_from_url(url)
 
-    # 이미지가 해당 경로에 존재하는지 확인합니다.
-    if os.path.exists(image_path):
-        # 이미지를 열고 반환합니다.
-        return Image.open(image_path)
-    else:
-        # 이미지가 존재하지 않을 경우 예외를 발생시킵니다.
-        raise FileNotFoundError(f"Tile Image for champion {champion_name} not found at {image_path}")
 def get_champion_tile_image(champion_name):
-    # 챔피언 이미지 파일 경로를 생성합니다.
-    image_path = os.path.join(CHAMPION_FOLDER, "tiles", f"{champion_name}_0.jpg")
-
-    # 이미지가 해당 경로에 존재하는지 확인합니다.
-    if os.path.exists(image_path):
-        # 이미지를 열고 반환합니다.
-        return Image.open(image_path)
-    else:
-        # 이미지가 존재하지 않을 경우 예외를 발생시킵니다.
-        raise FileNotFoundError(f"Tile Image for champion {champion_name} not found at {image_path}")
-
+    champion_name = _sanitize_champion_name(champion_name) # 이름 보정
+    root = ddragon_unversioned_img_root()
+    url = f"{root}/champion/tiles/{champion_name}_0.jpg"
+    return _image_from_url(url)
 
 
 def load_rune_data():
-    with open(RUNE_JSON_PATH, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    global _rune_json_cache, _rune_json_ver
+    v = get_data_dragon_version()
+    if _rune_json_cache is None or _rune_json_ver != v:
+        url = f"https://ddragon.leagueoflegends.com/cdn/{v}/data/en_US/runesReforged.json"
+        _rune_json_cache = json.loads(_ddragon_read(url).decode("utf-8"))
+        _rune_json_ver = v
+    return _rune_json_cache
+
+
 def get_rune_image(rune_id):
     rune_data = load_rune_data()
-    # rune_id를 통해 해당 룬을 검색합니다.
+    img_root = ddragon_unversioned_img_root()
     for rune_tree in rune_data:
-        if rune_tree['id'] == rune_id:
-            # 아이콘 경로 생성
-            icon_path = os.path.join(RUNE_IMAGE_FOLDER, rune_tree['icon'])
-
-            # 이미지 파일이 존재하는지 확인
-            if os.path.exists(icon_path):
-                return Image.open(icon_path)
-        for slot in rune_tree['slots']:
-            for rune in slot['runes']:
-                if rune['id'] == rune_id:
-                    # 아이콘 경로 생성
-                    icon_path = os.path.join(RUNE_IMAGE_FOLDER, rune['icon'])
-
-                    # 이미지 파일이 존재하는지 확인
-                    if os.path.exists(icon_path):
-                        return Image.open(icon_path)
-                    else:
-                        raise FileNotFoundError(f"Rune icon for ID {rune_id} not found at {icon_path}")
+        if rune_tree["id"] == rune_id:
+            url = f"{img_root}/{rune_tree['icon']}"
+            return _image_from_url(url)
+        for slot in rune_tree["slots"]:
+            for rune in slot["runes"]:
+                if rune["id"] == rune_id:
+                    url = f"{img_root}/{rune['icon']}"
+                    return _image_from_url(url)
 
     raise ValueError(f"Rune with ID {rune_id} not found in the data.")
+
+
 def get_stat_rune_image(rune_id):
     if rune_id in STAT_RUNE_MAP:
-        image_filename = STAT_RUNE_MAP[rune_id]
-        image_path = os.path.join(STAT_RUNE_FOLDER, image_filename)
-        if os.path.exists(image_path):
-            return Image.open(image_path)
-        else:
-            raise FileNotFoundError(f"Image file not found: {image_path}")
-    else:
-        raise ValueError(f"Invalid rune ID: {rune_id}")
+        fn = STAT_RUNE_MAP[rune_id]
+        url = f"{ddragon_unversioned_img_root()}/perk-images/StatMods/{fn}"
+        return _image_from_url(url)
+    raise ValueError(f"Invalid rune ID: {rune_id}")
+
+
 def load_spell_data():
-    with open(SPELL_JSON_PATH, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    global _spell_json_cache, _spell_json_ver
+    v = get_data_dragon_version()
+    if _spell_json_cache is None or _spell_json_ver != v:
+        url = f"https://ddragon.leagueoflegends.com/cdn/{v}/data/ko_KR/summoner.json"
+        _spell_json_cache = json.loads(_ddragon_read(url).decode("utf-8"))
+        _spell_json_ver = v
+    return _spell_json_cache
+
+
 def get_spell_name(spell_id):
     spell_data = load_spell_data()
-    # 'data' 항목에서 주어진 key 값을 찾아 'image'의 'full' 값을 반환
-    for spell in spell_data['data'].values():
-        if int(spell['key']) == int(spell_id):
-            return spell['image']['full']
-    # 해당하는 key 값을 찾지 못한 경우 KeyError 예외 발생
+    for spell in spell_data["data"].values():
+        if int(spell["key"]) == int(spell_id):
+            return spell["image"]["full"]
     raise KeyError(f"Key '{spell_id}' not found in the summoner data.")
+
 
 def get_spell_image(spell_id):
     spell_name = get_spell_name(spell_id)
-    image_path = os.path.join(SPELL_IMAGE_PATH, spell_name);
-
-    # 이미지가 해당 경로에 존재하는지 확인합니다.
-    if os.path.exists(image_path):
-        # 이미지를 열고 반환합니다.
-        return Image.open(image_path)
-    else:
-        # 이미지가 존재하지 않을 경우 예외를 발생시킵니다.
-        raise FileNotFoundError(f"loading Image for spell_id {spell_id} not found at {image_path}")
+    root = ddragon_versioned_cdn_root()
+    url = f"{root}/img/spell/{spell_name}"
+    return _image_from_url(url)

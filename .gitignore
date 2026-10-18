@@ -1,0 +1,17 @@
+.idea/
+.venv/
+.venv1/
+.ven/
+venv/
+
+__pycache__/
+*.pyc
+Thumbs.db
+
+client_secret.json
+token.json
+
+_recovered/
+dragontail-16.1.1/
+thumbnail/
+match/

@@ -2,6 +2,7 @@ import time
 
 import pytz
 import re
+import os
 
 from api import get_match_info
 from env import CHANNEL_ID
@@ -9,51 +10,6 @@ from make_thumbnail import create_thumbnail
 from name_conversion import get_real_champion_name
 from youtube import authenticate_youtube
 from datetime import datetime, timedelta
-
-def get_or_create_playlist(youtube, date_str):
-    playlist_title = f"{date_str} 영상 모음"
-
-    # 1. 기존 재생목록 확인
-    request = youtube.playlists().list(
-        part="snippet",
-        mine=True,
-        maxResults=50
-    )
-    response = request.execute()
-    for item in response.get("items", []):
-        if item["snippet"]["title"] == playlist_title:
-            return item["id"]  # 기존 재생목록 ID 반환
-
-    # 2. 없다면 새로 생성
-    request = youtube.playlists().insert(
-        part="snippet,status",
-        body={
-            "snippet": {
-                "title": playlist_title,
-                "description": f"{date_str}에 플레이한 게임 영상 모음",
-                "defaultLanguage": "ko"
-            },
-            "status": {
-                "privacyStatus": "public"
-            }
-        }
-    )
-    response = request.execute()
-    return response["id"]
-
-def add_video_to_playlist(youtube, playlist_id, video_id):
-    youtube.playlistItems().insert(
-        part="snippet",
-        body={
-            "snippet": {
-                "playlistId": playlist_id,
-                "resourceId": {
-                    "kind": "youtube#video",
-                    "videoId": video_id
-                }
-            }
-        }
-    ).execute()
 
 def create_description(video, language):
     game_id = video['game_id']
@@ -63,17 +19,35 @@ def create_description(video, language):
     champion_name = get_real_champion_name(match_info['championName'], language)
     opponent_champion_name = get_real_champion_name(match_info['opponentChampionName'], language)
 
+
+
     date_str = video['date_str']
     game_number_str = video['game_number']
     kda_str = video['kda_str']
 
-    title = f"{date_str} {game_number_str} {champion_name} vs {opponent_champion_name} {kda_str}"
+    tier_full = video['tier_full']
+
+    title = f"{date_str} {game_number_str} {champion_name} vs {opponent_champion_name} {kda_str} {tier_full}"
 
     # 언어별 간단한 설명 설정
     if language == "ko":
         description = "본채널 : https://www.youtube.com/channel/UCeV-ew08nfkEt9kkJ85sOSA"
     else:
         description = "Main Channel: https://www.youtube.com/channel/UCeV-ew08nfkEt9kkJ85sOSA"
+
+    # ------------------------------
+    # txt 파일 경로 (영상 파일명 기반)
+    # ------------------------------
+    # 영상 파일과 같은 위치에서 확장자만 txt로 변경
+    base_path, _ = os.path.splitext(video['file_path'])
+    txt_path = base_path + ".txt"
+    # txt 파일이 있으면 내용 추가
+    if os.path.exists(txt_path):
+        with open(txt_path, "r", encoding="utf-8") as f:
+            feedback_text = f.read().strip()
+            print(feedback_text)
+            if feedback_text:
+                description += "\n\n" + feedback_text
 
     return title, description
 
@@ -89,13 +63,17 @@ def get_all_uploaded_videos(youtube, channel_id, max_results=100):
     playlist_id = response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
     videos = []
-    pattern = r"^(\d{6}) (\d{1,2}) (.+?) vs (.+?) (\d+) (\d+) (\d+) (\d{10}) (\d+)$"
+    pattern = (
+        r"^(\d{6}) (\d{1,2}) (.+?) vs (.+?) "
+        r"(\d+) (\d+) (\d+) (\d{10}) (\d+) "
+        r"((?:Unranked)|(?:[A-Z]{1,2}\d{1,2}) (\d{1,4}))$"
+    )
 
     fetched_results = 0
     next_page_token = None
 
     while fetched_results < max_results:
-        current_max_results = min(max_results - fetched_results, 50)
+        current_max_results = min(max_results - fetched_results, 100)
 
         request = youtube.playlistItems().list(
             part="snippet",
@@ -117,16 +95,32 @@ def get_all_uploaded_videos(youtube, channel_id, max_results=100):
                 assists = match.group(7)
                 kda_str = f"{kills}_{deaths}_{assists}"
 
+                # 티어 문자열 (예: "GM1 240")
+                tier_group = match.group(10)
+
+                if tier_group == "Unranked":
+                    tier_full = "Unranked"
+                else:
+                    tier_full = tier_group  # "GM1 1083"
+
+
+                # 로컬 파일 경로 (영상 저장된 폴더 기준)
+                date_str = match.group(1)
+                filename = f"{title}.mkv"  # 실제 업로드 전 영상 확장자
+                file_path = os.path.join(f"C:/Users/seok/Videos/솔랭/{date_str}", filename)
+
                 videos.append({
                     "video_id": video_id,
-                    "date_str": match.group(1),
+                    "date_str": date_str,
                     "game_number": int(match.group(2)),
                     "our_champion_name": match.group(3),
                     "opponent_champion_name": match.group(4),
                     "kda_str": kda_str,
                     "game_id": f"KR_{match.group(8)}",
                     "participant_id": int(match.group(9)),
-                    "raw_title": title
+                    "raw_title": title,
+                    "file_path": file_path, # ✅ 여기 추가됨
+                    "tier_full": tier_full
                 })
 
         fetched_results += len(response.get("items", []))
@@ -138,8 +132,6 @@ def update_videos(youtube, videos):
     videos.sort(key=lambda v: (v["date_str"], v["game_number"]))
     # 예약 시간 기준 (1분 후부터 시작)
     base_time = datetime.now(pytz.timezone("Asia/Seoul")) + timedelta(minutes=1)
-
-    playlist_ids = {}  # date_str별 재생목록 ID 캐싱
 
     for index, video in enumerate(videos):
         video_id = video["video_id"]
@@ -174,7 +166,8 @@ def update_videos(youtube, videos):
             "status": {
                 "privacyStatus": "private",
                 "publishAt": scheduled_time_iso,
-                "selfDeclaredMadeForKids": False
+                "selfDeclaredMadeForKids": False,
+                "embeddable": True  # ✅ 이 줄을 추가하세요!
             }
         }
 
@@ -189,13 +182,6 @@ def update_videos(youtube, videos):
             videoId=video_id,
             media_body=thumbnail_path
         ).execute()
-
-        # ✅ 재생목록에 추가
-        date_str = video["date_str"]
-        if date_str not in playlist_ids:
-            playlist_ids[date_str] = get_or_create_playlist(youtube, date_str)
-
-        add_video_to_playlist(youtube, playlist_ids[date_str], video_id)
 
         print(f"[{index+1}] 예약됨: {ko_title} | 예약 시각: {scheduled_time.strftime('%Y-%m-%d %H:%M:%S')}")
         time.sleep(15) #rate limit
